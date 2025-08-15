@@ -5,11 +5,9 @@ import org.javers.common.collections.Maps;
 import org.javers.common.validation.Validate;
 import org.javers.core.metamodel.object.OwnerContext;
 
+import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.stream.Stream;
@@ -18,9 +16,60 @@ import java.util.stream.Stream;
  * @author bartosz walacik
  */
 public class MapType extends KeyValueType {
+    private final List<Type> concreteTypeArguments;
 
     public MapType(Type baseJavaType, TypeMapperLazy typeMapperlazy) {
         super(baseJavaType, 2, typeMapperlazy);
+
+        if (super.getKeyJavaType() == DEFAULT_TYPE_PARAMETER && super.getValueJavaType() == DEFAULT_TYPE_PARAMETER) {
+            concreteTypeArguments = buildMapTypeArguments(getBaseJavaClass());
+        } else {
+            concreteTypeArguments = null;
+        }
+    }
+
+    private static List<Type> buildMapTypeArguments(Class<?> baseJavaClass) {
+        if (baseJavaClass == Map.class) {
+            return null; // Handled by base class
+        }
+
+        for (Class<?> current = baseJavaClass; current != null; current = current.getSuperclass()) {
+            Type superClass = current.getGenericSuperclass();
+            if (superClass instanceof ParameterizedType) {
+                Type rawType = ((ParameterizedType) superClass).getRawType();
+                if (rawType instanceof Class && Map.class.isAssignableFrom((Class<?>) rawType)) {
+                    return buildListOfConcreteTypeArguments(superClass, 2);
+                }
+            }
+
+            Type[] interfaces = current.getGenericInterfaces();
+            Optional<Type> mapInterface = Arrays.stream(interfaces)
+                    .filter(it -> it instanceof ParameterizedType)
+                    .filter(it -> ((ParameterizedType) it).getRawType() instanceof Class)
+                    .filter(it -> Map.class.isAssignableFrom((Class<?>) ((ParameterizedType) it).getRawType()))
+                    .findFirst();
+            if (mapInterface.isPresent()) {
+                return buildListOfConcreteTypeArguments(mapInterface.get(), 2);
+            }
+        }
+
+        throw new IllegalStateException("baseJavaType is not a Map");
+    }
+
+    @Override
+    public Type getKeyJavaType() {
+        if (concreteTypeArguments == null) {
+            return super.getKeyJavaType();
+        }
+        return concreteTypeArguments.get(0);
+    }
+
+    @Override
+    public Type getValueJavaType() {
+        if (concreteTypeArguments == null) {
+            return super.getValueJavaType();
+        }
+        return concreteTypeArguments.get(1);
     }
 
     /**
